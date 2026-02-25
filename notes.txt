@@ -1,0 +1,300 @@
+                                           #TERRAFORM BACKEND CONFIGURATION#
+terraform {
+  backend "s3" {
+  bucket = "tfstatefile-bucket1998"  
+  key = "dev/terraform.tfstate"
+  region = "ap-south-1"
+  encrypt = true
+  use_lockfile = true
+  #inbuilt locking mechanism without dynamodb
+ }
+ } 
+ -->Use the backend configuration in the main.tf file itself.S3 and Dynamodb is already created.
+                                         
+                                         #TERRAFORM VARIABLES - input/output/local#
+
+-->Defining a variable:
+
+variable "environment" {
+  # Optional arguments go here
+  type = string
+  default = "dev"
+}
+
+-->to use this variable: S3 bucket: environment = var.environment
+                         VPC: environment = var.environment
+                         EC2 instance: environment = var.environment
+1)locals :-  
+
+locals {
+  service_name  = "payment-api"
+  owner         = "Engineering Team"
+  project_name  = "my-terraform-project"
+  instance_type = "t2.micro"
+  env = var.environment
+  bucket_name = "sachin-${local.env}"
+  vpc_name = "${var.environment}-VPC"
+}
+--> To Use locals in resources :
+S3 bucket: name = local.bucket_name
+
+VPC: name = local.vpc_name
+
+EC2 instance: name = local.bucket_name
+
+2)Output:-
+output "ec2_public_ip" {
+  value = aws_instance.my_instance[*].public_ip
+}
+
+TIP:Input variables brought values in from outside
+
+Local variables let you reuse and shape values inside our configuration
+
+Output variables give you values back, so you know exactly what Terraform created
+
+-->Variable Precedence
+1)Option 1: Default value
+2)export TF_VAR_environment=stage  {override default value}
+3)Option 3: .tfvars file   {overrides both the default and environment variable.}
+4)terraform plan -var="environment=prod"   {override everything else}
+
+terraform.tfvars → Actual values for your input variables.Contains sensitive information so not included in git repository
+                             ## TERRAFORM TYPE CONSTRAINTS ##
+Meta arguments help guide Terraform on how to manage resources. For example, they can tell Terraform in what order to create resources, how many copies of a resource to make, or how to loop over a collection of items. Three PRIMITIVE Constraints Type:
+a)Numbers :-  variable "cpu_threshold" {
+  type        = number    #This denotes the type of data the variable holds
+  description = "CPU utilization threshold (can be a decimal)"
+  default     = 75.5
+}
+b)Strings :- variable "instance_type" {
+  type        = string  #This denotes the string type
+  description = "EC2 instance type (e.g., t3.medium)"
+}
+c)Bool  :- variable "enable_monitoring" {
+  type        = bool  #Wether the value given is 0 or 1/True or false
+  description = "Whether to enable detailed CloudWatch monitoring for the EC2 instance"
+  default     = true
+}
+COMPLEX Type:
+a)list :- variable "security_group_ids" {
+  description = "A list of security group IDs for the EC2 instance"
+  type        = list(string) #Lists are especially helpful when we have values that naturally belong together and need to appear in order.var,sg_ids[0]
+  default     = ["sg-12345", "sg-67890"] #list(type): An ordered sequence of elements.
+}
+
+b)set :-variable "allowed_ports" {
+  type        = set(number)  #
+  description = "Set of ingress ports" #set(type): An unordered collection of unique elements
+  default     = [22, 80, 443, 80]      #we cannot use indexing like var.environments[0].
+}
+Note :- Use a list when order matters or when duplicates are allowed.
+        Use a set when order doesn’t matter and we want to protect ourself from duplicates. 
+
+c)maps :- variable "region_ami_map" {
+  # Specifies that all values in the map must be strings
+  type = map(string) 
+  default = {
+    us-east-1 = "ami-1234abcd"
+    us-west-2 = "ami-5678efgh"
+  }
+  description = "A map of AMI IDs per AWS region"
+}        -->Accessing the Map values
+output "east_ami_id" {
+  value = var.region_ami_map["us-east-1"]
+}
+# This will output: ami-1234abcd
+
+d)Tuple:- variable "server_config" {
+  type = tuple([string, number, bool])
+  description = "A configuration tuple: [instance_type, volume_size, enable_monitoring]"
+  default = ["t3.micro", 20, true]
+}
+accessing tuples:
+var.server_config[0] → "t3.micro"
+var.server_config[1]→ "20"
+var.server_config[2] → true
+c)Objects:-variable "server_config" {
+  type = object({               #helping you manage multiple values together in a single, logical package.
+    name             = string
+    cpu_cores        = number
+    enable_monitoring = bool
+  })
+  default = {
+    name             = "web-server"
+    cpu_cores        = 2
+    enable_monitoring = true
+  }
+}
+-----------------------------------------------------------------------------------------------------
+                                ###  TERRAFORM META ARGUMENTS  ###
+Meta arguments guides Terraform on how to manage resources. For example, they can tell Terraform in what order to create resources, how many copies of a resource to make, or how to loop over a collection of items. 
+-Implicit dependency happens automatically when a resource references another.
+
+-Explicit dependency is when we manually declare the relationship.
+1)depends_on :-resource "aws_s3_bucket" "example_bucket" {
+  bucket = "my-unique-bucket-name"
+}
+
+resource "aws_instance" "example_instance" {
+  ami           = "ami-0c94855ba95c71c99"
+  instance_type = "t2.micro"
+
+  # Explicit dependency: EC2 instance will only be created after the S3 bucket
+  depends_on = [
+    aws_s3_bucket.example_bucket
+  ]
+}
+2)count :- resource "aws_s3_bucket" "multiple_buckets" {
+  count = length(var.bucket_names)
+
+  # Access the specific bucket name using count.index
+  bucket = var.bucket_names[count.index]
+
+  tags = {
+    Name        = "Managed by Terraform Count"
+    Environment = "Dev"
+  }
+}
+
+# Example of how to add a standard configuration (e.g., ACL) for each bucket
+resource "aws_s3_bucket_acl" "multiple_buckets_acl" {
+  count = length(var.bucket_names)   #create a list(string) separate for this.
+
+  # Reference the ID of the corresponding bucket instance
+  bucket = aws_s3_bucket.multiple_buckets[count.index].id
+  acl    = "private"
+}
+3)for_each :-# Create S3 buckets using for_each
+resource "aws_s3_bucket" "project_bucket" {
+  for_each = var.s3_bucket_names
+  bucket   = each.value # The 'each.value' refers to the current string in the set
+
+  tags = {
+    Project     = "Multi-Bucket-Deployment"
+    Environment = "Dev"
+    ManagedBy   = "Terraform"
+  }
+}
+-----------------------------------------------------------------------------------------------------
+                                       ## LIFECYCLE RULES ###
+We’ve seen how create_before_destroy helps us avoid downtime, and prevent_destroy keeps our important resources safe from accidental deletions.
+                                       
+1)create_before_destroy :-resource "aws_instance" "example" {
+  # ... other arguments
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+2)prevent_destroy :-lifecycle {
+  prevent_destroy = true #Even changes that normally force a recreation (like changing the AMI) are blocked if prevent_destroy is enabled. To allow destruction, you would need to either set it to false or narrow the scope of the rule.
+}
+
+3)ignore_changes:tags = {
+    Project = "MyWebApp"
+    Ownertags = {
+    Project = "MyWebApp"
+    Owner   = "Team Alpha"
+  }
+
+  lifecycle {
+    # Terraform will ignore any changes to the 'tags' attribute 
+    # made outside of this configuration.
+    ignore_changes = [
+      tags,
+    ]   = "Team Alpha"
+  }
+
+  lifecycle {
+    # Terraform will ignore any changes to the 'tags' attribute 
+    # made outside of this configuration.
+    ignore_changes = [
+      tags,
+    ]
+4)replace_triggered_by : resource "aws_db_instance" "example" {
+  // ... other database configuration ...
+
+  vpc_security_group_ids = [aws_security_group.example.id]
+
+  lifecycle {
+    // This resource will be replaced if the referenced resource
+    // (aws_security_group.example) has a "replace" action in the plan.
+    replace_triggered_by = [
+      aws_security_group.example.id
+    ]
+  }
+}
+5)Preconditions prevent mistakes before resources are created.
+
+Postconditions verify compliance and correctness after creation
+-----------------------------------------------------------------------------------------------------
+1)conditional expressions :- variable "environment" {
+  default = "dev"
+}
+
+resource "aws_instance" "example" {
+  # ...
+  instance_type = var.environment == "prod" ? "t3.large" : "t3.micro"
+  # ...
+} #condition ? true_value : false_value
+2)Dynamic Blocks :-
+1. Define the input variable:
+
+variable "ingress_rules" {
+  type = list(object({
+    description = string
+    port        = number
+    protocol    = string
+    cidr_blocks = list(string)
+  }))
+  default = [
+    {
+      description = "Allow HTTP traffic"
+      port        = 80
+      protocol    = "tcp"
+      cidr_blocks = ["0.0.0.0/0"]
+    },
+    {
+      description = "Allow HTTPS traffic"
+      port        = 443
+      protocol    = "tcp"
+      cidr_blocks = ["0.0.0.0/0"]
+    }
+  ]
+}
+2. Use a dynamic block within the resource: 
+resource "aws_security_group" "example" {
+  name        = "resource_with_dynamic_block"
+  # ... other arguments ...
+
+  dynamic "ingress" {
+    for_each = var.ingress_rules
+    content {
+      description = ingress.value.description
+      from_port   = ingress.value.port
+      to_port     = ingress.value.port
+      protocol    = ingress.value.protocol
+      cidr_blocks = ingress.value.cidr_blocks
+    }
+  }
+
+  tags = {
+    Name = "AWS security group dynamic block"
+  }
+}
+
+3)Splat Expressions :
+resource "aws_instance" "web_servers" {
+  count = 3
+}
+output "instance_private_ips" {
+  description = "List of private IP addresses for all web instances"
+  value       = aws_instance.web_servers[*].private_ip
+}
+TIP :-Conditional expressions: so Terraform can decide the right value for us.
+
+      Dynamic blocks: so we don’t have to rewrite the same structure over and over.
+
+      Splat expressions: so we can collect multiple values in one simple line.
+------------------------------------------------------------------------------------------------------------------

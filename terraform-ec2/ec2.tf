@@ -5,13 +5,12 @@ resource "aws_key_pair" "my_key" {
 
 resource "aws_default_vpc" "default" {
 
-
 }
 
 resource "aws_security_group" "my_security_group" {
   name        = "automatesg"
   description = "this will add a TF generated Security group"
-  vpc_id      = aws_default_vpc.default.id #interpolation
+  vpc_id      = aws_default_vpc.default.id  #interpolation
 
   #Inbound Rules  
   ingress {

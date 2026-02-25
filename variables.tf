@@ -2,7 +2,7 @@ variable "ec2_instance_type" {
   default = "t3.micro"
   type    = string
 }
-
+#var.ec2_instance_type --> to access value using a variable 
 variable "ec2_default_root_storage_size" {
   default = 10
   type    = number
@@ -14,6 +14,6 @@ variable "ec2_ami_id" {
 }
 
 variable "env" {
-   default = "prd"
+   default = "prd"     #accessed using var.environment
    type    = string
 }
